@@ -26,6 +26,6 @@ jobs:
     - name: Run sheet monitor
       env:
         GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
         GITHUB_REPOSITORY: ${{ github.repository }}
       run: python scripts/sheet_monitor.py 
