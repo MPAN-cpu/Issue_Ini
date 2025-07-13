@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 """
 Google Sheet Monitor for GitHub Issues
-Monitors a Google Sheet for changes in the paper_id column and creates new GitHub issues.
+Monitors a public Google Sheet for changes in the paper_id column and creates new GitHub issues.
 """
 
 import os
 import json
-import base64
 import requests
 from datetime import datetime
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
 
 class SheetMonitor:
     def __init__(self):
@@ -20,27 +16,6 @@ class SheetMonitor:
         self.github_repo = os.environ.get('GITHUB_REPOSITORY')
         self.state_file = 'sheet_state.json'
         
-        # Initialize Google Sheets API
-        self.sheets_service = self._init_google_sheets()
-        
-    def _init_google_sheets(self):
-        """Initialize Google Sheets API service."""
-        try:
-            # Decode service account key from base64
-            service_account_info = json.loads(
-                base64.b64decode(os.environ.get('GOOGLE_SERVICE_ACCOUNT_KEY')).decode('utf-8')
-            )
-            
-            credentials = service_account.Credentials.from_service_account_info(
-                service_account_info,
-                scopes=['https://www.googleapis.com/auth/spreadsheets.readonly']
-            )
-            
-            return build('sheets', 'v4', credentials=credentials)
-        except Exception as e:
-            print(f"Error initializing Google Sheets API: {e}")
-            return None
-    
     def _load_state(self):
         """Load the previous state of processed paper_ids."""
         try:
@@ -60,31 +35,37 @@ class SheetMonitor:
             print(f"Error saving state: {e}")
     
     def _get_sheet_data(self):
-        """Fetch data from Google Sheet."""
+        """Fetch data from public Google Sheet."""
         try:
-            # Assuming paper_id is in column A, adjust range as needed
-            range_name = 'A:A'  # Adjust based on your sheet structure
+            # Convert sheet ID to CSV export URL
+            csv_url = f"https://docs.google.com/spreadsheets/d/{self.sheet_id}/export?format=csv"
             
-            result = self.sheets_service.spreadsheets().values().get(
-                spreadsheetId=self.sheet_id,
-                range=range_name
-            ).execute()
+            response = requests.get(csv_url)
+            response.raise_for_status()
             
-            values = result.get('values', [])
-            if not values:
+            # Parse CSV data
+            lines = response.text.strip().split('\n')
+            if not lines:
                 print("No data found in sheet.")
                 return []
             
             # Extract paper_ids (skip header row if exists)
             paper_ids = []
-            for row in values[1:]:  # Skip first row if it's a header
-                if row and row[0].strip():  # Check if cell is not empty
-                    paper_ids.append(row[0].strip())
+            for line in lines[1:]:  # Skip first row if it's a header
+                if line.strip():
+                    # Split by comma and take the first column (paper_id)
+                    columns = line.split(',')
+                    if columns and columns[0].strip():
+                        paper_id = columns[0].strip().strip('"')  # Remove quotes if present
+                        paper_ids.append(paper_id)
             
             return paper_ids
             
-        except HttpError as e:
+        except requests.RequestException as e:
             print(f"Error fetching sheet data: {e}")
+            return []
+        except Exception as e:
+            print(f"Error parsing sheet data: {e}")
             return []
     
     def _create_github_issue(self, paper_id):
@@ -165,8 +146,8 @@ This issue was automatically created from Google Sheet monitoring.
         """Main execution method."""
         print(f"🔄 Starting sheet monitor at {datetime.now()}")
         
-        if not self.sheets_service:
-            print("❌ Failed to initialize Google Sheets service")
+        if not self.sheet_id:
+            print("❌ GOOGLE_SHEET_ID environment variable not set")
             return
         
         # Load previous state
